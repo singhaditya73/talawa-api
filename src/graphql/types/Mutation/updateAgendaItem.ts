@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { agendaItemAttachmentsTable } from "~/src/drizzle/tables/agendaItemAttachments";
 import { agendaItemsTable } from "~/src/drizzle/tables/agendaItems";
 import { builder } from "~/src/graphql/builder";
 import {
@@ -245,29 +246,56 @@ builder.mutationField("updateAgendaItem", (t) =>
 				});
 			}
 
-			const [updatedAgendaItem] = await ctx.drizzleClient
-				.update(agendaItemsTable)
-				.set({
-					description: parsedArgs.input.description,
-					duration: parsedArgs.input.duration,
-					folderId: parsedArgs.input.folderId,
-					key: parsedArgs.input.key,
-					name: parsedArgs.input.name,
-					updaterId: currentUserId,
-				})
-				.where(eq(agendaItemsTable.id, parsedArgs.input.id))
-				.returning();
+			// Use transaction to atomically update agenda item and replace attachments
+			return await ctx.drizzleClient.transaction(async (tx) => {
+				const [updatedAgendaItem] = await tx
+					.update(agendaItemsTable)
+					.set({
+						description: parsedArgs.input.description,
+						duration: parsedArgs.input.duration,
+						folderId: parsedArgs.input.folderId,
+						key: parsedArgs.input.key,
+						name: parsedArgs.input.name,
+						updaterId: currentUserId,
+					})
+					.where(eq(agendaItemsTable.id, parsedArgs.input.id))
+					.returning();
 
-			// Updated agenda item not being returned means that either it was deleted or its `id` column was changed by external entities before this update operation could take place.
-			if (updatedAgendaItem === undefined) {
-				throw new TalawaGraphQLError({
-					extensions: {
-						code: "unexpected",
-					},
-				});
-			}
+				// Updated agenda item not being returned means it was deleted or its id changed.
+				if (updatedAgendaItem === undefined) {
+					throw new TalawaGraphQLError({
+						extensions: {
+							code: "unexpected",
+						},
+					});
+				}
 
-			return updatedAgendaItem;
+				// Handle attachments if provided - replace all existing with new set
+				if (isNotNullish(parsedArgs.input.attachments)) {
+					// Delete existing attachments
+					await tx
+						.delete(agendaItemAttachmentsTable)
+						.where(
+							eq(agendaItemAttachmentsTable.agendaItemId, parsedArgs.input.id),
+						);
+
+					// Insert new attachments if any
+					if (parsedArgs.input.attachments.length > 0) {
+						await tx.insert(agendaItemAttachmentsTable).values(
+							parsedArgs.input.attachments.map((attachment) => ({
+								agendaItemId: updatedAgendaItem.id,
+								creatorId: currentUserId,
+								fileHash: attachment.fileHash,
+								mimeType: attachment.mimeType,
+								name: attachment.name,
+								objectName: attachment.objectName,
+							})),
+						);
+					}
+				}
+
+				return updatedAgendaItem;
+			});
 		},
 		type: AgendaItem,
 	}),

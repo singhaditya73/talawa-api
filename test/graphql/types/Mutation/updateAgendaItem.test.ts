@@ -1078,4 +1078,196 @@ suite("Mutation updateAgendaItem", () => {
 			);
 		});
 	});
+
+	suite("Attachments", () => {
+		const testCleanupFunctions: Array<() => Promise<void>> = [];
+
+		afterEach(async () => {
+			for (const cleanup of testCleanupFunctions.reverse()) {
+				try {
+					await cleanup();
+				} catch (error) {
+					console.error("Cleanup failed:", error);
+				}
+			}
+			testCleanupFunctions.length = 0;
+		});
+
+		test("Successfully updates agenda item with new attachments", async () => {
+			const { cachedAdminToken: adminAuthToken } =
+				await getAdminAuthTokenAndId();
+			const agendaItem = await createTestAgendaItem();
+			testCleanupFunctions.push(agendaItem.cleanup);
+
+			const updateResult = await mercuriusClient.mutate(
+				Mutation_updateAgendaItem,
+				{
+					headers: { authorization: `bearer ${adminAuthToken}` },
+					variables: {
+						input: {
+							id: agendaItem.agendaItemId,
+							name: "Updated With Attachments",
+							attachments: [
+								{
+									objectName: "update-object-1",
+									fileHash:
+										"c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+									mimeType: "image/png",
+									name: "update-image.png",
+								},
+							],
+						} as unknown as {
+							id: string;
+							name: string;
+						},
+					},
+				},
+			);
+
+			expect(updateResult.errors).toBeUndefined();
+			assertToBeNonNullish(updateResult.data?.updateAgendaItem);
+			expect(updateResult.data.updateAgendaItem.name).toEqual(
+				"Updated With Attachments",
+			);
+
+			// Verify attachment stored with complete metadata
+			const attachments =
+				await server.drizzleClient.query.agendaItemAttachmentsTable.findMany({
+					where: (fields, { eq }) =>
+						eq(fields.agendaItemId, agendaItem.agendaItemId),
+				});
+			expect(attachments).toHaveLength(1);
+			expect(attachments[0]?.objectName).toEqual("update-object-1");
+			expect(attachments[0]?.fileHash).toEqual(
+				"c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+			);
+			expect(attachments[0]?.mimeType).toEqual("image/png");
+			expect(attachments[0]?.name).toEqual("update-image.png");
+		});
+
+		test("Successfully replaces existing attachments", async () => {
+			const { cachedAdminToken: adminAuthToken } =
+				await getAdminAuthTokenAndId();
+			const agendaItem = await createTestAgendaItem();
+			testCleanupFunctions.push(agendaItem.cleanup);
+
+			// First update - add initial attachment
+			await mercuriusClient.mutate(Mutation_updateAgendaItem, {
+				headers: { authorization: `bearer ${adminAuthToken}` },
+				variables: {
+					input: {
+						id: agendaItem.agendaItemId,
+						name: "First Update",
+						attachments: [
+							{
+								objectName: "initial-object",
+								fileHash:
+									"d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+								mimeType: "image/png",
+								name: "initial.png",
+							},
+						],
+					} as unknown as {
+						id: string;
+						name: string;
+					},
+				},
+			});
+
+			// Second update - replace with new attachment
+			const updateResult = await mercuriusClient.mutate(
+				Mutation_updateAgendaItem,
+				{
+					headers: { authorization: `bearer ${adminAuthToken}` },
+					variables: {
+						input: {
+							id: agendaItem.agendaItemId,
+							name: "Second Update",
+							attachments: [
+								{
+									objectName: "replaced-object",
+									fileHash:
+										"e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
+									mimeType: "image/jpeg",
+									name: "replaced.jpg",
+								},
+							],
+						} as unknown as {
+							id: string;
+							name: string;
+						},
+					},
+				},
+			);
+
+			expect(updateResult.errors).toBeUndefined();
+
+			// Verify only new attachment exists
+			const attachments =
+				await server.drizzleClient.query.agendaItemAttachmentsTable.findMany({
+					where: (fields, { eq }) =>
+						eq(fields.agendaItemId, agendaItem.agendaItemId),
+				});
+			expect(attachments).toHaveLength(1);
+			expect(attachments[0]?.objectName).toEqual("replaced-object");
+		});
+
+		test("Successfully removes all attachments with empty array", async () => {
+			const { cachedAdminToken: adminAuthToken } =
+				await getAdminAuthTokenAndId();
+			const agendaItem = await createTestAgendaItem();
+			testCleanupFunctions.push(agendaItem.cleanup);
+
+			// First add an attachment
+			await mercuriusClient.mutate(Mutation_updateAgendaItem, {
+				headers: { authorization: `bearer ${adminAuthToken}` },
+				variables: {
+					input: {
+						id: agendaItem.agendaItemId,
+						name: "Has Attachment",
+						attachments: [
+							{
+								objectName: "to-be-removed",
+								fileHash:
+									"f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1",
+								mimeType: "image/png",
+								name: "remove.png",
+							},
+						],
+					} as unknown as {
+						id: string;
+						name: string;
+					},
+				},
+			});
+
+			// Then remove all attachments
+			const removeResult = await mercuriusClient.mutate(
+				Mutation_updateAgendaItem,
+				{
+					headers: { authorization: `bearer ${adminAuthToken}` },
+					variables: {
+						input: {
+							id: agendaItem.agendaItemId,
+							name: "No Attachments",
+							attachments: [],
+						} as unknown as {
+							id: string;
+							name: string;
+						},
+					},
+				},
+			);
+
+			expect(removeResult.errors).toBeUndefined();
+
+			// Verify no attachments remain
+			const attachments =
+				await server.drizzleClient.query.agendaItemAttachmentsTable.findMany({
+					where: (fields, { eq }) =>
+						eq(fields.agendaItemId, agendaItem.agendaItemId),
+				});
+			expect(attachments).toHaveLength(0);
+		});
+	});
 });

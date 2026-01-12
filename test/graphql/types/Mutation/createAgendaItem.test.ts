@@ -879,4 +879,143 @@ suite("Mutation field createAgendaItem", () => {
 			expect(result.errors).toBeUndefined();
 		});
 	});
+
+	suite("Attachments", () => {
+		test("Successfully creates agenda item with attachments", async () => {
+			const { token: adminAuthToken, userId: adminUserId } =
+				await getAdminAuth();
+			const { cleanup, folderId } = await createTestEnvironment(
+				adminAuthToken,
+				adminUserId,
+			);
+			testCleanupFunctions.push(cleanup);
+
+			const result = await mercuriusClient.mutate(Mutation_createAgendaItem, {
+				headers: { authorization: `bearer ${adminAuthToken}` },
+				variables: {
+					input: {
+						folderId,
+						name: "Agenda Item With Attachments",
+						type: "general",
+						attachments: [
+							{
+								objectName: "test-object-1",
+								fileHash:
+									"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+								mimeType: "image/png",
+								name: "test-image.png",
+							},
+							{
+								objectName: "test-object-2",
+								fileHash:
+									"b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+								mimeType: "image/jpeg",
+								name: "test-photo.jpg",
+							},
+						],
+					} as unknown as {
+						folderId: string;
+						name: string;
+						type: "general";
+					},
+				},
+			});
+
+			assertToBeNonNullish(result.data?.createAgendaItem);
+			expect(result.data.createAgendaItem.name).toEqual(
+				"Agenda Item With Attachments",
+			);
+			expect(result.errors).toBeUndefined();
+
+			// Verify attachments were stored in database with complete metadata
+			const agendaItemId = result.data.createAgendaItem?.id;
+			const attachments =
+				await server.drizzleClient.query.agendaItemAttachmentsTable.findMany({
+					where: (fields, { eq }) => eq(fields.agendaItemId, agendaItemId),
+				});
+
+			expect(attachments).toHaveLength(2);
+
+			// Verify first attachment with complete metadata
+			const attachment1 = attachments.find(
+				(a) => a.objectName === "test-object-1",
+			);
+			assertToBeNonNullish(attachment1);
+			expect(attachment1.fileHash).toEqual(
+				"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+			);
+			expect(attachment1.mimeType).toEqual("image/png");
+			expect(attachment1.name).toEqual("test-image.png");
+
+			// Verify second attachment with complete metadata
+			const attachment2 = attachments.find(
+				(a) => a.objectName === "test-object-2",
+			);
+			assertToBeNonNullish(attachment2);
+			expect(attachment2.fileHash).toEqual(
+				"b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+			);
+			expect(attachment2.mimeType).toEqual("image/jpeg");
+			expect(attachment2.name).toEqual("test-photo.jpg");
+		});
+
+		test("Successfully creates agenda item without attachments", async () => {
+			const { token: adminAuthToken, userId: adminUserId } =
+				await getAdminAuth();
+			const { cleanup, folderId } = await createTestEnvironment(
+				adminAuthToken,
+				adminUserId,
+			);
+			testCleanupFunctions.push(cleanup);
+
+			const result = await mercuriusClient.mutate(Mutation_createAgendaItem, {
+				headers: { authorization: `bearer ${adminAuthToken}` },
+				variables: {
+					input: {
+						folderId,
+						name: "Agenda Item Without Attachments",
+						type: "general",
+					},
+				},
+			});
+
+			assertToBeNonNullish(result.data?.createAgendaItem);
+			expect(result.data.createAgendaItem.name).toEqual(
+				"Agenda Item Without Attachments",
+			);
+			expect(result.errors).toBeUndefined();
+		});
+
+		test("Successfully creates agenda item with empty attachments array", async () => {
+			const { token: adminAuthToken, userId: adminUserId } =
+				await getAdminAuth();
+			const { cleanup, folderId } = await createTestEnvironment(
+				adminAuthToken,
+				adminUserId,
+			);
+			testCleanupFunctions.push(cleanup);
+
+			const result = await mercuriusClient.mutate(Mutation_createAgendaItem, {
+				headers: { authorization: `bearer ${adminAuthToken}` },
+				variables: {
+					input: {
+						folderId,
+						name: "Agenda Item Empty Attachments",
+						type: "general",
+						attachments: [],
+					} as unknown as {
+						folderId: string;
+						name: string;
+						type: "general";
+					},
+				},
+			});
+
+			assertToBeNonNullish(result.data?.createAgendaItem);
+			expect(result.data.createAgendaItem.name).toEqual(
+				"Agenda Item Empty Attachments",
+			);
+			expect(result.errors).toBeUndefined();
+		});
+	});
 });
